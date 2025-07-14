@@ -1,107 +1,107 @@
-# 🧠 WholeBIF Explorer
+# 🧠 WholeBIF Explorer – Postgres Edition
 
-> Unified neuroscience connectome explorer – build the **WholeBIF‑RDB** database *once* and inspect it through a modern **Gradio UI**.
->
-> **Stack** : SQLite / MySQL · SQLAlchemy 2 · Gradio 4 · Pillow · RapidFuzz · Python 3.12
-
-<p align="center">
-  <img src="docs/screenshot_matrix.png" alt="Matrix heat‑map screenshot" width="65%">
-</p>
+End‑to‑end workflow: **build the WholeBIF‑RDB schema in PostgreSQL** from the official SQLite dump (or Google Sheet) and launch the one‑file **Gradio UI**.
 
 ---
 
-## ✨ Features
+## ✨ Feature Summary
 
-| Module                    | What it does                                                                                                              |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| **Database builder**      | Converts the original WholeBIF Google Sheet / SQL dump into **SQLite** (single file) or **MySQL 8** schema.               |
-| **Autocomplete search**   | Type‑ahead suggestions (<50 ms) for Circuit IDs & full names.                                                             |
-| **Single & pair queries** | ① Keyword → Connections / References / Evidence / Scores.<br>② `(Circuit ID, Receiver ID)` → direct lookup + detail pane. |
-| **Connectivity matrix**   | On‑the‑fly Pillow heat‑map visualizing existing projections (hover ▶ tooltip, click ▶ deep‑link search – WIP).            |
-| **One‑file UI**           | `gradio_wholebif_app.py` (<600 LoC) — quick hackable, no framework lock‑in.                                               |
-| **macOS manual**          | Step‑by‑step Homebrew / pyenv setup – *Min 15 min to first query*.                                                        |
+| Module                       | Highlights                                                                                                                          |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| **`build_wholebifrdb.py`**   | • CLI tool that copies data from `wholebif.db` (SQLite) → PostgreSQL.<br>• Reflects schema, creates tables, bulk‑inserts per chunk. |
+| **`gradio_wholebif_app.py`** | • Autocomplete search, pair lookup, Pillow heat‑map.<br>• Works with *any* SQLAlchemy URI (SQLite / MySQL / **PostgreSQL**).        |
+| **macOS / Linux manual**     | Brew + pyenv + Postgres 15; 10‑min from clone to running UI.                                                                        |
 
 ---
 
-## 🚀 Quick start (SQLite, macOS)
+## 1 · Prerequisites (macOS Monterey+)
 
 ```bash
-# clone this repo
-$ git clone https://github.com/your‑org/wholebif‑explorer.git && cd wholebif‑explorer
+# Homebrew core
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+brew install pyenv git postgresql@15
+# start Postgres service
+brew services start postgresql@15
 
-# install runtime (pyenv, Homebrew)
-$ brew install pyenv && pyenv install 3.12.3 && pyenv local 3.12.3
-$ pip install -r requirements.txt
+# Python env
+pyenv install 3.12.3 && pyenv virtualenv 3.12.3 wholebif-env && pyenv local wholebif-env
+pip install --upgrade pip wheel
+pip install sqlalchemy psycopg2-binary pandas rapidfuzz pillow gradio
+```
 
-# download the DB (≈600 MB) & rename
-$ curl -L -o wholebif.db \
+> **psycopg2‑binary** is mandatory for PostgreSQL.
+
+---
+
+## 2 · Obtain the data dump
+
+```bash
+curl -L -o wholebif.db \
   "https://drive.google.com/uc?export=download&id=11GwfVqOVMOwig2uFNfNJWgyDK4EHqAZY"
-
-# launch the UI on http://localhost:7860
-$ python gradio_wholebif_app.py
 ```
 
-> **⌛ First launch?** SQLite creates a statement cache; expect 3‑5 s warm‑up.
+*(or)* export sheets → CSV → import path; `build_wholebifrdb.py` accepts either.
 
 ---
 
-### MySQL 8 mode (optional)
+## 3 · Build WholeBIF‑RDB in PostgreSQL
 
 ```bash
-# 1) install / start server
-brew install mysql && brew services start mysql
+# create user & DB (defaults: user = wholebif, db = wholebif)
+createuser -s wholebif
+createdb -O wholebif wholebif
 
-# 2) create DB & import dump
-mysql -u root -p -e "CREATE DATABASE wholebif CHARACTER SET utf8mb4;"
-mysql -u root -p wholebif < wholebif_dump.sql
-
-# 3) point the app via env‑var
-export WHOLEBIF_DB_URI=mysql+mysqlconnector://root:PWD@localhost:3306/wholebif
-python gradio_wholebif_app.py
+# run the builder
+python build_wholebifrdb.py --sqlite wholebif.db \
+       --pg postgresql+psycopg2://wholebif@localhost:5432/wholebif \
+       --chunk 5000
 ```
+
+*Copy time*: 1–2 min on M‑chip for ≈1 M rows.
 
 ---
 
-### Docker compose (all‑in‑one)
+## 4 · Launch the Gradio UI (Postgres)
 
 ```bash
-docker compose up --build
-# → Frontend: http://localhost:7860
+export WHOLEBIF_DB_URI=postgresql+psycopg2://wholebif@localhost:5432/wholebif
+python gradio_wholebif_app.py  # → http://localhost:7860
 ```
 
 ---
 
-## 📂 Project layout
+## 5 · Docker (optional all‑in‑one)
 
-```
-wholebif‑explorer/
-├─ gradio_wholebif_app.py   # One‑file UI (v3.0)
-├─ db/
-│   ├─ wholebif.db          # SQLite database (git‑ignored)
-│   └─ wholebif_dump.sql    # canonical MySQL dump (optional)
-├─ docs/
-│   └─ screenshot_matrix.png
-├─ requirements.txt         # pinned deps
-└─ README.md
+```bash
+docker compose -f docker-compose.postgres.yml up --build
 ```
 
----
-
-## 🛠️ Development tips
-
-* **Hot‑reload** : run `gradio_wholebif_app.py` with `--dev` (Gradio auto‑reloads on save).
-* **VS Code launch.json** in `/docs` for debugging presets.
-* **Schema evolutions** : edit `gradio_wholebif_app.py` → ORM section, keep `@lru_cache` helpers in sync.
-* **Performance** : switch `build_heatmap()` to `NumPy → matplotlib → Agg` for large N.
+* Services: `db` (Postgres 15), `app` (builder + UI).
 
 ---
 
-## 🤝 Contributing
+## 6 · Troubleshooting
 
-Pull requests are welcome – please run `pre‑commit run ‑‑all-files` before submitting.
+| Issue                                          | Fix                                                |
+| ---------------------------------------------- | -------------------------------------------------- |
+| `psycopg2.OperationalError: could not connect` | Is Postgres running? (`brew services list`)        |
+| `relation "circuits" does not exist`           | Build step skipped – run `build_wholebifrdb.py`    |
+| UI port busy                                   | `python gradio_wholebif_app.py --server_port 7861` |
 
 ---
 
-## 📜 License
+## 7 · File list
 
-Apache‑2.0 © 2025 WholeBIF Team
+```
+├─ build_wholebifrdb.py      # DB loader (this repo)
+├─ gradio_wholebif_app.py    # UI (this repo)
+├─ wholebif.db               # original SQLite dump (✗ git‑tracked)
+├─ requirements.txt          # pinned deps
+└─ README.md                 # you are here
+```
+
+---
+
+## 8 · License
+
+Apache‑2.0 © 2025 WholeBIF Team
